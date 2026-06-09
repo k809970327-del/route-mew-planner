@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+.streamlit/secrets.toml
+pending_store_list.json
+
+cloudflared-err.txt
+cloudflared-out.txt
+tools/cloudflared.exe
+
+.DS_Store
+Thumbs.db
