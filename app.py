@@ -426,7 +426,84 @@ def row_to_store_entry(row: pd.Series) -> str:
     )
 
 
+def supabase_settings() -> tuple[str, str, str]:
+    try:
+        url = str(st.secrets.get("SUPABASE_URL", "")).strip().rstrip("/")
+        key = str(
+            st.secrets.get("SUPABASE_SECRET_KEY", "")
+            or st.secrets.get("SUPABASE_SERVICE_ROLE_KEY", "")
+        ).strip()
+        user_id = str(st.secrets.get("APP_USER_ID", "candace")).strip() or "candace"
+        return url, key, user_id
+    except Exception:
+        return "", "", "candace"
+
+
+def cloud_sync_enabled() -> bool:
+    url, key, _ = supabase_settings()
+    return bool(url and key)
+
+
+def supabase_headers(key: str, prefer: str = "") -> dict[str, str]:
+    headers = {"apikey": key}
+    if key.startswith("eyJ"):
+        headers["Authorization"] = f"Bearer {key}"
+    if prefer:
+        headers["Prefer"] = prefer
+    return headers
+
+
+def load_cloud_pending_entries() -> list[str] | None:
+    url, key, user_id = supabase_settings()
+    if not url or not key:
+        return None
+    try:
+        response = requests.get(
+            f"{url}/rest/v1/route_state",
+            headers=supabase_headers(key),
+            params={"user_id": f"eq.{user_id}", "select": "entries"},
+            timeout=8,
+        )
+        response.raise_for_status()
+        rows = response.json()
+        entries = rows[0].get("entries", []) if rows else []
+        if not isinstance(entries, list):
+            entries = []
+        st.session_state["cloud_sync_status"] = "connected"
+        return [str(entry).strip() for entry in entries if str(entry).strip()]
+    except (requests.RequestException, ValueError, TypeError, IndexError):
+        st.session_state["cloud_sync_status"] = "error"
+        return None
+
+
+def save_cloud_pending_entries(entries: list[str]) -> bool:
+    url, key, user_id = supabase_settings()
+    if not url or not key:
+        return False
+    try:
+        response = requests.post(
+            f"{url}/rest/v1/route_state",
+            headers=supabase_headers(key, "resolution=merge-duplicates,return=minimal"),
+            json={
+                "user_id": user_id,
+                "entries": entries,
+                "updated_at": datetime.now().isoformat(timespec="seconds"),
+            },
+            timeout=8,
+        )
+        response.raise_for_status()
+        st.session_state["cloud_sync_status"] = "connected"
+        return True
+    except requests.RequestException:
+        st.session_state["cloud_sync_status"] = "error"
+        return False
+
+
 def load_pending_entries() -> list[str]:
+    cloud_entries = load_cloud_pending_entries()
+    if cloud_entries is not None:
+        st.session_state["pending_entries_cache"] = cloud_entries
+        return cloud_entries
     session_entries = st.session_state.get("pending_entries_cache")
     if isinstance(session_entries, list):
         return [str(entry).strip() for entry in session_entries if str(entry).strip()]
@@ -457,6 +534,7 @@ def save_pending_entries(entries: list[str]) -> None:
         "entries": clean_entries,
     }
     st.session_state["pending_entries_cache"] = clean_entries
+    save_cloud_pending_entries(clean_entries)
     try:
         PENDING_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     except OSError:
@@ -2012,6 +2090,25 @@ def configured_google_api_key() -> str:
         return ""
 
 
+def require_app_pin() -> None:
+    try:
+        expected_pin = str(st.secrets.get("APP_PIN", "")).strip()
+    except Exception:
+        expected_pin = ""
+    if not expected_pin or st.session_state.get("app_pin_verified"):
+        return
+    st.title("跑店小幫手")
+    st.caption("請輸入個人密碼後繼續。")
+    entered_pin = st.text_input("密碼", type="password", key="app_pin_input")
+    if st.button("開啟工作清單", type="primary"):
+        if entered_pin == expected_pin:
+            st.session_state["app_pin_verified"] = True
+            st.rerun()
+        else:
+            st.error("密碼不正確，請再試一次。")
+    st.stop()
+
+
 def load_pending_to_input() -> None:
     pending = load_pending_entries()
     if pending:
@@ -2071,11 +2168,19 @@ def main() -> None:
     st.set_page_config(page_title="跑店小幫手", page_icon="🛵", layout="wide")
     inject_app_style()
     top_anchor()
+    require_app_pin()
 
     stores = pd.DataFrame(STORE_DATA)
     stores["normalized_name"] = stores["name"].map(normalize_name)
 
     pending_entries = load_pending_entries()
+    if cloud_sync_enabled():
+        if st.session_state.get("cloud_sync_status") == "error":
+            st.sidebar.warning("雲端同步暫時無法連線，已使用本機備援。")
+        else:
+            st.sidebar.success("手機與電腦雲端同步中")
+    else:
+        st.sidebar.info("目前使用本機記憶，尚未設定手機同步。")
     render_hero(len(stores), len(pending_entries))
     render_action_menu()
 
