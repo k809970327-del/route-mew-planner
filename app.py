@@ -25,6 +25,8 @@ MATCH_THRESHOLD = 0.58
 HIGH_SPREAD_REGION_COUNT = 4
 PENDING_FILE = Path(__file__).with_name("pending_store_list.json")
 HERO_IMAGE = Path(__file__).with_name("assets") / "korean_route_hero.png"
+if not HERO_IMAGE.exists():
+    HERO_IMAGE = Path(__file__).with_name("korean_route_hero.png")
 HOME_NAME = "出發/返回點"
 HOME_ADDRESS = "台北市萬華區艋舺大道297號"
 HOME_LAT = 25.0322
@@ -1730,7 +1732,7 @@ def inject_app_style() -> None:
     )
 
 
-def render_hero(store_count: int, pending_count: int) -> None:
+def _render_hero_legacy(store_count: int, pending_count: int) -> None:
     hero_image = image_data_uri(HERO_IMAGE)
     image_html = f'<img class="planner-hero-image" src="{hero_image}" alt="韓系柔和路線插圖" />' if hero_image else ""
     st.markdown(
@@ -1793,6 +1795,58 @@ def render_hero(store_count: int, pending_count: int) -> None:
                         <div class="planner-mini-list">
                             <div class="planner-mini-row"><span>Start</span><span>艋舺大道 297 號</span></div>
                             <div class="planner-mini-row"><span>Plan</span><span>自動分區排序</span></div>
+                            <div class="planner-mini-row"><span>Share</span><span>LINE 文字</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_hero(store_count: int, pending_count: int) -> None:
+    hero_image = image_data_uri(HERO_IMAGE)
+    image_html = (
+        f'<img class="planner-hero-image" src="{hero_image}" alt="可愛貓咪路線規劃" />'
+        if hero_image
+        else ""
+    )
+    st.markdown(
+        f"""
+        <div class="planner-hero">
+            <div class="planner-topbar">
+                <div class="planner-brand">
+                    <div class="planner-logo">R</div>
+                    <div>Route Mew</div>
+                </div>
+                <div class="planner-menu">
+                    <a href="#route-input-top">今日清單</a>
+                    <a href="#store-picker">門市挑選</a>
+                    <a href="#route-result">路線結果</a>
+                    <a href="#line-copy">LINE 文字</a>
+                </div>
+            </div>
+            <div class="planner-hero-grid">
+                <div class="planner-hero-copy">
+                    <div class="planner-eyebrow">CUTE DAILY ROUTE PLANNER</div>
+                    <h1>今天跑哪幾家，喵一下排好</h1>
+                    <p>貼上或勾選門市後，自動整理任務、拆分區域、排出順路行程，最後產生可轉傳的 LINE 文字。</p>
+                    <div class="planner-chip-row">
+                        <span>固定出發與返回：台北市萬華區艋舺大道297號</span>
+                        <span>內建門市：{store_count} 家</span>
+                        <span>未完成記憶：{pending_count} 家</span>
+                    </div>
+                </div>
+                <div class="planner-hero-visual">
+                    {image_html}
+                    <div class="planner-hero-panel">
+                        <div class="planner-panel-number">{pending_count}</div>
+                        <div class="planner-panel-copy">今天還有 {pending_count} 家待安排，選好門市後就能立即規劃。</div>
+                        <div class="planner-mini-list">
+                            <div class="planner-mini-row"><span>Start</span><span>艋舺大道 297 號</span></div>
+                            <div class="planner-mini-row"><span>Plan</span><span>自動排序路線</span></div>
                             <div class="planner-mini-row"><span>Share</span><span>LINE 文字</span></div>
                         </div>
                     </div>
