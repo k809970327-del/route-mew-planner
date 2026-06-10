@@ -348,6 +348,10 @@ def extract_task_tags(value: str) -> tuple[bool, bool, bool]:
     return is_urgent, has_return_pickup, has_temp_photo
 
 
+def is_temp_photo_task_line(value: str) -> bool:
+    return bool(re.fullmatch(r"臨時交辦\s*[\(（]\s*拍照\s*[\)）]", value.strip()))
+
+
 def clean_return_item(value: str) -> str:
     text = value.strip()
     text = re.sub(r"^\s*\d+\s*[\.\)、:：-]\s*", "", text)
@@ -702,6 +706,15 @@ def match_input_lines(lines: Iterable[str], stores: pd.DataFrame) -> tuple[pd.Da
         idx, score, cleaned = best_store_match(original, stores)
         if idx is None:
             if last_matched_row is not None:
+                if is_temp_photo_task_line(original):
+                    last_matched_row["臨時交辦(拍照)"] = True
+                    last_matched_row["任務"] = task_note(
+                        bool(last_matched_row.get("急件", False)),
+                        bool(last_matched_row.get("收退貨", False)),
+                        True,
+                        str(last_matched_row.get("退貨品項", "")),
+                    )
+                    continue
                 return_item = clean_return_item(original)
                 if return_item:
                     append_return_item(last_matched_row, return_item)
@@ -1028,9 +1041,9 @@ def inject_app_style() -> None:
                 linear-gradient(180deg, rgba(255, 248, 220, 0.94), rgba(255, 248, 220, 0.86));
             border: 5px solid rgba(255, 255, 255, 0.92);
             border-radius: 42px;
-            padding: 1.55rem 1.65rem;
+            padding: 1rem 1.25rem;
             box-shadow: 0 18px 0 rgba(142, 120, 76, 0.18), 0 26px 52px rgba(58, 96, 91, 0.18);
-            margin: 0.4rem 0 1.2rem 0;
+            margin: 0.25rem 0 0.7rem 0;
             overflow: hidden;
         }
 
@@ -1067,7 +1080,7 @@ def inject_app_style() -> None:
             align-items: center;
             justify-content: space-between;
             gap: 1rem;
-            margin-bottom: 1rem;
+            margin-bottom: 0.55rem;
         }
 
         .planner-brand {
@@ -1123,9 +1136,9 @@ def inject_app_style() -> None:
 
         .planner-hero-grid {
             display: grid;
-            grid-template-columns: minmax(0, 0.95fr) minmax(330px, 0.72fr);
-            gap: 1.2rem;
-            align-items: end;
+            grid-template-columns: minmax(0, 1fr) minmax(260px, 0.52fr);
+            gap: 0.8rem;
+            align-items: center;
         }
 
         .planner-visual-stack {
@@ -1423,6 +1436,23 @@ def inject_app_style() -> None:
             background: #fff8dc;
         }
 
+        .planner-hero-visual {
+            display: grid;
+            grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr);
+            gap: 0.65rem;
+            align-items: center;
+        }
+
+        .planner-hero-copy h1 {
+            font-size: 2.15rem;
+            line-height: 1.18;
+            margin: 0.35rem 0 0.45rem 0;
+        }
+
+        .planner-hero-copy p {
+            margin: 0.25rem 0 0.55rem 0;
+        }
+
         .planner-hero-panel {
             background: rgba(255, 248, 220, 0.92);
             border: 4px solid rgba(255, 255, 255, 0.86);
@@ -1448,8 +1478,8 @@ def inject_app_style() -> None:
         }
 
         .planner-mini-list {
+            display: none;
             margin-top: 0.8rem;
-            display: grid;
             gap: 0.42rem;
         }
 
@@ -1747,9 +1777,20 @@ def inject_app_style() -> None:
             }
 
             .planner-hero-image {
-                border-radius: 24px;
-                border-width: 3px;
-                box-shadow: 0 7px 0 rgba(142, 120, 76, 0.12);
+                display: none;
+            }
+
+            .planner-hero-visual {
+                display: block;
+            }
+
+            .planner-hero-panel {
+                padding: 0.7rem !important;
+            }
+
+            .planner-hero-copy p,
+            .planner-eyebrow {
+                display: none;
             }
 
             .planner-hero-panel,
@@ -2160,6 +2201,49 @@ def save_unfinished_from_status(status_records: list[dict]) -> None:
     st.session_state["show_plan"] = False
 
 
+def remaining_entries_after_completion(
+    matched_records: list[dict],
+    completed_names: set[str],
+) -> list[str]:
+    return [
+        row_to_store_entry(pd.Series(record))
+        for record in matched_records
+        if str(record.get("name", "")) not in completed_names
+    ]
+
+
+def auto_save_completion_status(
+    matched_records: list[dict],
+    status_records: list[dict],
+    editor_key: str,
+) -> None:
+    editor_state = st.session_state.get(editor_key, {})
+    edited_rows = editor_state.get("edited_rows", {}) if isinstance(editor_state, dict) else {}
+    updated_status = [dict(record) for record in status_records]
+    for raw_idx, changes in edited_rows.items():
+        try:
+            idx = int(raw_idx)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= idx < len(updated_status):
+            updated_status[idx].update(changes)
+
+    completed_names = {
+        str(record["門市"])
+        for record in updated_status
+        if bool(record.get("已完成", False))
+    }
+    if not completed_names:
+        return
+
+    remaining_entries = remaining_entries_after_completion(matched_records, completed_names)
+    save_pending_entries(remaining_entries)
+    st.session_state["today_store_list"] = "\n".join(remaining_entries)
+    st.session_state["show_plan"] = True
+    completed_text = "、".join(sorted(completed_names))
+    st.session_state["completion_auto_save_message"] = f"{completed_text} 已完成，剩餘任務已自動保存。"
+
+
 def start_planning() -> None:
     st.session_state["show_plan"] = True
 
@@ -2182,26 +2266,26 @@ def main() -> None:
     else:
         st.sidebar.info("目前使用本機記憶，尚未設定手機同步。")
     render_hero(len(stores), len(pending_entries))
-    render_action_menu()
+    with st.expander("查看使用方式"):
+        render_action_menu()
 
     with st.sidebar:
-        st.header("路線參數")
-        start_at = st.time_input("第一家預計抵達時間", value=time(9, 30))
-        stop_minutes = st.number_input("每店停留分鐘", min_value=5, max_value=180, value=DEFAULT_STOP_MINUTES, step=5)
-        speed_kmh = st.number_input("機車平均時速 km/h", min_value=10, max_value=80, value=DEFAULT_SPEED_KMH, step=5)
-        cloud_api_key = configured_google_api_key()
-        manual_api_key = st.text_input("Google Distance Matrix API Key（可空白）", type="password")
-        api_key = manual_api_key or cloud_api_key
-        if cloud_api_key:
-            st.caption("已載入 Streamlit Cloud Secret。")
-        st.divider()
-        st.metric("內建雙北超市", f"{len(stores)} 家")
-        st.download_button(
-            "下載內建門市 CSV",
-            stores.drop(columns=["normalized_name"]).to_csv(index=False).encode("utf-8-sig"),
-            file_name="carrefour_north_taiwan_stores.csv",
-            mime="text/csv",
-        )
+        with st.expander("路線參數與進階設定"):
+            start_at = st.time_input("第一家預計抵達時間", value=time(9, 30))
+            stop_minutes = st.number_input("每店停留分鐘", min_value=5, max_value=180, value=DEFAULT_STOP_MINUTES, step=5)
+            speed_kmh = st.number_input("機車平均時速 km/h", min_value=10, max_value=80, value=DEFAULT_SPEED_KMH, step=5)
+            cloud_api_key = configured_google_api_key()
+            manual_api_key = st.text_input("Google Distance Matrix API Key（可空白）", type="password")
+            api_key = manual_api_key or cloud_api_key
+            if cloud_api_key:
+                st.caption("已載入 Streamlit Cloud Secret。")
+            st.metric("內建雙北超市", f"{len(stores)} 家")
+            st.download_button(
+                "下載內建門市 CSV",
+                stores.drop(columns=["normalized_name"]).to_csv(index=False).encode("utf-8-sig"),
+                file_name="carrefour_north_taiwan_stores.csv",
+                mime="text/csv",
+            )
 
     sample = "北投公館店\n士林雨聲店\n中和復興店\n板橋四維店\n新店安康二店"
     if "today_store_list" not in st.session_state:
@@ -2211,15 +2295,14 @@ def main() -> None:
         st.session_state["show_plan"] = False
 
     with st.sidebar:
-        st.divider()
-        st.header("未完成記憶")
-        st.metric("下次自動帶入", f"{len(pending_entries)} 家")
-        if pending_entries:
-            st.caption("目前記憶：")
-            st.code("\n".join(pending_entries), language="text")
-        st.button("載入未完成", disabled=not pending_entries, on_click=load_pending_to_input, width="stretch")
-        st.button("把目前輸入存成未完成", on_click=save_current_text_as_pending, width="stretch")
-        st.button("清空未完成記憶", on_click=clear_pending_memory, width="stretch")
+        with st.expander(f"未完成記憶與資料工具（{len(pending_entries)} 家）"):
+            st.metric("下次自動帶入", f"{len(pending_entries)} 家")
+            if pending_entries:
+                st.caption("目前記憶：")
+                st.code("\n".join(pending_entries), language="text")
+            st.button("載入未完成", disabled=not pending_entries, on_click=load_pending_to_input, width="stretch")
+            st.button("把目前輸入存成未完成", on_click=save_current_text_as_pending, width="stretch")
+            st.button("清空未完成記憶", on_click=clear_pending_memory, width="stretch")
 
     input_cols = st.columns([1, 0.18])
     with input_cols[0]:
@@ -2289,6 +2372,9 @@ def main() -> None:
         return
 
     st.markdown('<div id="route-result"></div>', unsafe_allow_html=True)
+    completion_message = st.session_state.pop("completion_auto_save_message", "")
+    if completion_message:
+        st.success(completion_message)
     lines = raw_text.splitlines()
     matched, misses = match_input_lines(lines, stores)
     if matched.empty:
@@ -2345,56 +2431,59 @@ def main() -> None:
     recommended_names = names_with_tasks(recommended_route)
     recommended_round_legs = round_trip_legs(recommended_route, "", float(speed_kmh))
     recommended_km, recommended_minutes = route_distance_summary(recommended_round_legs)
-    st.success(f"建議今天跑：{recommended_names}")
-    st.caption(f"{recommend_reason}；從 {HOME_ADDRESS} 出發並返回，預估騎乘 {recommended_km} km / {recommended_minutes} 分鐘。")
-    st.dataframe(
-        display_store_plan(recommended_route),
-        width="stretch",
-        hide_index=True,
-    )
-
     route_options = [f"路線 {chr(65 + idx)}：{region}（{region_counts[region]} 家）" for idx, region in enumerate(regions)]
+    recommended_option = (
+        f"推薦方案｜跑 {recommend_count} 家｜約 {recommended_km} km / {recommended_minutes} 分鐘"
+    )
+    all_option = f"全部都跑｜{len(matched)} 家｜跨區自動排序"
     selected = st.radio(
-        "今日跑法（下方時程表會依這裡產生）",
-        options=[f"使用自動建議（跑 {recommend_count} 家）", "硬著頭皮全跑（跨區自動排序）", *route_options],
+        "選擇今天採用的路線方案",
+        options=[recommended_option, *route_options, all_option],
         horizontal=False,
+        help="推薦方案已依任務優先度與距離集中度計算；也可以改選單一分區或全部都跑。",
     )
 
-    if selected.startswith("使用自動建議"):
+    if selected == recommended_option:
         planning_df = recommended_route.copy()
         title = f"自動建議：跑 {recommend_count} 家"
+        selected_reason = recommend_reason
     elif selected.startswith("路線"):
         region = selected.split("：", 1)[1].split("（", 1)[0]
         planning_df = matched[matched["region"] == region].copy()
         title = selected
+        selected_reason = f"只跑 {region}，減少跨區移動"
     else:
         planning_df = matched.copy()
         title = "今日全跑路線"
+        selected_reason = "保留全部門市並自動排序"
 
-    st.info(f"目前套用：{title}｜{names_with_tasks(planning_df)}")
+    st.success(f"目前採用：{title}")
+    st.caption(f"{selected_reason}｜{names_with_tasks(planning_df)}")
     st.dataframe(
         display_store_plan(planning_df),
         width="stretch",
         hide_index=True,
     )
     remaining_count = max(0, len(matched) - len(planning_df))
-    memory_cols = st.columns([0.34, 0.33, 0.33])
-    with memory_cols[0]:
-        st.button(
-            f"這條已跑完，剩下 {remaining_count} 家存下次",
-            on_click=mark_route_done_and_save_remaining,
-            args=(matched.to_dict("records"), planning_df["name"].tolist()),
-            width="stretch",
-        )
-    with memory_cols[1]:
-        st.button(
-            "全部先存成未完成",
-            on_click=save_matched_as_pending,
-            args=(matched.to_dict("records"),),
-            width="stretch",
-        )
-    with memory_cols[2]:
-        st.button("清空未完成記憶", on_click=clear_pending_memory, width="stretch")
+    with st.expander("其他保存操作"):
+        st.caption("完成狀態會自動保存；以下保留原有手動操作作為備援。")
+        memory_cols = st.columns([0.34, 0.33, 0.33])
+        with memory_cols[0]:
+            st.button(
+                f"這條已跑完，剩下 {remaining_count} 家存下次",
+                on_click=mark_route_done_and_save_remaining,
+                args=(matched.to_dict("records"), planning_df["name"].tolist()),
+                width="stretch",
+            )
+        with memory_cols[1]:
+            st.button(
+                "全部先存成未完成",
+                on_click=save_matched_as_pending,
+                args=(matched.to_dict("records"),),
+                width="stretch",
+            )
+        with memory_cols[2]:
+            st.button("清空未完成記憶", on_click=clear_pending_memory, width="stretch")
 
     route, _visit_legs = nearest_neighbor_route(planning_df, api_key, float(speed_kmh))
     legs = round_trip_legs(route, api_key, float(speed_kmh))
@@ -2436,20 +2525,29 @@ def main() -> None:
         section_title("完成狀態", "勾選已跑完的店，剩下的可存到下次")
         status_df = timeline[["門市", "任務", "分區", "地址"]].copy()
         status_df.insert(0, "已完成", False)
+        completion_editor_key = f"completion_status_{abs(hash(tuple(route['name'].tolist())))}"
         edited_status = st.data_editor(
             status_df,
             width="stretch",
             hide_index=True,
             disabled=["門市", "任務", "分區", "地址"],
             column_config={"已完成": st.column_config.CheckboxColumn("已完成")},
-            key="completion_status",
+            key=completion_editor_key,
+            on_change=auto_save_completion_status,
+            args=(
+                matched.to_dict("records"),
+                status_df.to_dict("records"),
+                completion_editor_key,
+            ),
         )
-        st.button(
-            "更新未完成記憶",
-            on_click=save_unfinished_from_status,
-            args=(edited_status.to_dict("records"),),
-            width="stretch",
-        )
+        st.caption("勾選完成後會立即同步並自動顯示剩餘路線。")
+        with st.expander("手動保存備援"):
+            st.button(
+                "更新未完成記憶",
+                on_click=save_unfinished_from_status,
+                args=(edited_status.to_dict("records"),),
+                width="stretch",
+            )
     with right:
         section_title("地圖", "快速確認路線方向")
         render_map(route)
