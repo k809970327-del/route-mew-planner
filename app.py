@@ -368,6 +368,7 @@ def extract_return_item(value: str) -> str:
     patterns = [
         r"(?:收退貨|退貨品項|退貨|收貨|品項)\s*[:：]\s*(.+)$",
         r"[|｜]\s*(?:收退貨|退貨品項|退貨|收貨|品項)\s*[:：]?\s*(.+)$",
+        r"收退貨\s*([^:：\s].*)$",
     ]
     for pattern in patterns:
         match = re.search(pattern, text)
