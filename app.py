@@ -194,6 +194,7 @@ OFFICIAL_MARKET_ROWS = [
     ("台北農安二店", "台北市中山區農安街26、26-1號"),
     ("台北林森北店", "台北市中山區林森北路413號B1"),
     ("台北長安東店", "台北市中山區長安東路2段63、63-1、63-2號"),
+    ("台北錦州店", "台北市中山區錦州街"),
     ("台北北安店", "台北市中山區北安路595巷11號, 13號"),
     ("台北八德店", "台北市松山區八德路4段83號"),
     ("台北光復店", "台北市松山區光復北路198號"),
@@ -374,6 +375,23 @@ def extract_return_item(value: str) -> str:
         match = re.search(pattern, text)
         if match:
             return clean_return_item(match.group(1))
+    return ""
+
+
+def extract_trailing_return_item(value: str, store_name: str) -> str:
+    candidates = [store_name, re.sub(r"店$", "", store_name)]
+    candidates.extend(alias for alias, target in STORE_ALIASES.items() if target == store_name)
+    for candidate in sorted(set(candidates), key=len, reverse=True):
+        match = re.search(re.escape(candidate), value)
+        if not match:
+            continue
+        remainder = value[match.end():]
+        if remainder.startswith(("|", "｜")):
+            return ""
+        item_text = remainder.strip(" -　,，、。:：")
+        if not item_text or re.match(r"^(收退貨|退貨品項|退貨|收貨|品項|急件|緊急|優先|臨時交辦|拍照)", item_text):
+            return ""
+        return clean_return_item(item_text)
     return ""
 
 
@@ -596,6 +614,16 @@ def best_store_match(raw_line: str, stores: pd.DataFrame) -> tuple[int | None, f
         alias_hit = stores[stores["normalized_name"] == normalized_target]
         if not alias_hit.empty:
             return int(alias_hit.index[0]), 0.99, cleaned
+    alias_substrings = [
+        (alias_key, target_key)
+        for alias_key, target_key in alias_map.items()
+        if alias_key and alias_key in normalized_line
+    ]
+    if alias_substrings:
+        _, target_key = max(alias_substrings, key=lambda item: len(item[0]))
+        alias_hit = stores[stores["normalized_name"] == target_key]
+        if not alias_hit.empty:
+            return int(alias_hit.index[0]), 0.98, cleaned
 
     substring_matches = []
     for idx, row in stores.iterrows():
@@ -730,6 +758,8 @@ def match_input_lines(lines: Iterable[str], stores: pd.DataFrame) -> tuple[pd.Da
         is_urgent, has_return_pickup, has_temp_photo = extract_task_tags(original)
         return_item = extract_return_item(original)
         item = stores.loc[idx].copy()
+        if not return_item:
+            return_item = extract_trailing_return_item(original, str(item["name"]))
         item["input_name"] = cleaned or original
         item["match_score"] = score
         item["急件"] = is_urgent
