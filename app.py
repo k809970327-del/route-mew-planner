@@ -913,7 +913,10 @@ def google_maps_url(route: pd.DataFrame) -> str:
     base = "https://www.google.com/maps/dir/?api=1&travelmode=driving"
     origin = HOME_ADDRESS
     destination = HOME_ADDRESS
-    waypoints = "|".join(row["address"] for _, row in route.iterrows())
+    waypoints = "|".join(
+        f'{row["brand"]} {row["name"]} {row["address"]}'
+        for _, row in route.iterrows()
+    )
     params = {
         "origin": origin,
         "destination": destination,
@@ -921,6 +924,29 @@ def google_maps_url(route: pd.DataFrame) -> str:
     if waypoints:
         params["waypoints"] = waypoints
     return base + "&" + urllib.parse.urlencode(params, safe="|,")
+
+
+def render_route_steps(timeline: pd.DataFrame, maps_url: str) -> None:
+    if timeline.empty:
+        st.info("目前沒有可顯示的路線。")
+        return
+    st.markdown('<div class="route-step-list">', unsafe_allow_html=True)
+    for _, row in timeline.iterrows():
+        task_text = f'<span class="route-step-task">{row["任務"]}</span>' if row.get("任務") else ""
+        st.markdown(
+            f"""
+            <div class="route-step-item">
+                <div class="route-step-order">{int(row["順序"])}</div>
+                <div class="route-step-main">
+                    <div class="route-step-title">{row["門市"]}{task_text}</div>
+                    <div class="route-step-time">{row["抵達"]} - {row["離開"]}｜{row["分區"]}</div>
+                    <a class="route-step-address" href="{maps_url}" target="_blank" rel="noopener">家樂福｜{row["地址"]}</a>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def line_text(title: str, timeline: pd.DataFrame, legs: list[Leg], maps_url: str) -> str:
@@ -1605,6 +1631,71 @@ def inject_app_style() -> None:
             color: #64748b;
             font-size: 0.86rem;
             line-height: 1.45;
+        }
+
+        .route-step-list {
+            display: grid;
+            gap: 0.72rem;
+            margin: 0.35rem 0 1rem 0;
+        }
+
+        .route-step-item {
+            display: flex;
+            gap: 0.75rem;
+            align-items: flex-start;
+            background: rgba(255, 255, 255, 0.92);
+            border: 3px solid rgba(255, 255, 255, 0.95);
+            border-radius: 24px;
+            padding: 0.82rem 0.9rem;
+            box-shadow: 0 7px 0 rgba(142, 120, 76, 0.10);
+        }
+
+        .route-step-order {
+            flex: 0 0 2rem;
+            width: 2rem;
+            height: 2rem;
+            border-radius: 999px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: #f6a21a;
+            color: #ffffff;
+            font-weight: 900;
+        }
+
+        .route-step-main {
+            min-width: 0;
+            flex: 1;
+        }
+
+        .route-step-title {
+            color: var(--planner-ink);
+            font-weight: 900;
+            font-size: 1rem;
+            line-height: 1.35;
+            margin-bottom: 0.18rem;
+        }
+
+        .route-step-task {
+            display: inline-block;
+            margin-left: 0.35rem;
+            color: #b45309;
+            font-size: 0.9rem;
+            font-weight: 800;
+        }
+
+        .route-step-time {
+            color: #64748b;
+            font-size: 0.86rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .route-step-address {
+            color: #0f6b7a !important;
+            font-weight: 800;
+            text-decoration: underline;
+            text-underline-offset: 3px;
+            overflow-wrap: anywhere;
         }
 
         .planner-menu-grid {
@@ -2520,39 +2611,12 @@ def main() -> None:
     legs = round_trip_legs(route, api_key, float(speed_kmh))
     timeline = build_timeline(route, legs, start_at, int(stop_minutes))
     maps_url = google_maps_url(route)
-    distance_km, ride_minutes = route_distance_summary(legs)
-
-    if len(route) == 1:
-        st.info(f"單店路線：今天只跑 {route.iloc[0]['name']}，會從 {HOME_ADDRESS} 出發，完成後再回到同一地址。")
-
-    cols = st.columns(4)
-    with cols[0]:
-        metric_card("門市數", f"{len(route)} 家", "今日套用路線")
-    with cols[1]:
-        metric_card("騎乘距離", f"{distance_km} km", "含出發與返回")
-    with cols[2]:
-        metric_card("騎乘時間", f"{ride_minutes} 分鐘", f"每店停留 {int(stop_minutes)} 分鐘另計")
-    with cols[3]:
-        metric_card("分區數", f"{planning_df['region'].nunique()} 區", "越少越順路")
 
     left, right = st.columns([1.15, 0.85])
     with left:
-        section_title("建議順序與時程", "依照目前選擇的跑法產生")
-        st.dataframe(timeline, width="stretch", hide_index=True)
-        st.caption(f"點對點騎乘估算（出發與返回：{HOME_ADDRESS}）")
-        if legs:
-            leg_df = pd.DataFrame(
-                {
-                    "起點": [leg.origin for leg in legs],
-                    "終點": [leg.destination for leg in legs],
-                    "公里": [round(leg.km, 1) for leg in legs],
-                    "分鐘": [leg.minutes for leg in legs],
-                    "來源": [leg.source for leg in legs],
-                }
-            )
-            st.dataframe(leg_df, width="stretch", hide_index=True)
-        else:
-            st.info("目前沒有可計算的路線。")
+        section_title("今日路線", "點地址會開啟已排好的 Google Maps 路線")
+        st.caption(f"出發與返回：{HOME_ADDRESS}")
+        render_route_steps(timeline, maps_url)
         section_title("完成狀態", "勾選已跑完的店，剩下的可存到下次")
         status_df = timeline[["門市", "任務", "分區", "地址"]].copy()
         status_df.insert(0, "已完成", False)
