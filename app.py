@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import html
 import json
 import math
 import re
@@ -926,21 +927,39 @@ def google_maps_url(route: pd.DataFrame) -> str:
     return base + "&" + urllib.parse.urlencode(params, safe="|,")
 
 
+def google_maps_current_location_url(row: pd.Series) -> str:
+    destination = f'{row["brand"]} {row["name"]} {row["address"]}'
+    params = {
+        "api": "1",
+        "travelmode": "driving",
+        "destination": destination,
+    }
+    return "https://www.google.com/maps/dir/?" + urllib.parse.urlencode(params, safe=",")
+
+
 def render_route_steps(timeline: pd.DataFrame, maps_url: str) -> None:
     if timeline.empty:
         st.info("目前沒有可顯示的路線。")
         return
     st.markdown('<div class="route-step-list">', unsafe_allow_html=True)
     for _, row in timeline.iterrows():
-        task_text = f'<span class="route-step-task">{row["任務"]}</span>' if row.get("任務") else ""
+        current_url = google_maps_current_location_url(row)
+        task_text = f'<span class="route-step-task">{html.escape(str(row["任務"]))}</span>' if row.get("任務") else ""
+        store_name = html.escape(str(row["門市"]))
+        region = html.escape(str(row["分區"]))
+        address = html.escape(str(row["地址"]))
         st.markdown(
             f"""
             <div class="route-step-item">
                 <div class="route-step-order">{int(row["順序"])}</div>
                 <div class="route-step-main">
-                    <div class="route-step-title">{row["門市"]}{task_text}</div>
-                    <div class="route-step-time">{row["抵達"]} - {row["離開"]}｜{row["分區"]}</div>
-                    <a class="route-step-address" href="{maps_url}" target="_blank" rel="noopener">家樂福｜{row["地址"]}</a>
+                    <div class="route-step-title">{store_name}{task_text}</div>
+                    <div class="route-step-time">{row["抵達"]} - {row["離開"]}｜{region}</div>
+                    <div class="route-step-address">家樂福｜{address}</div>
+                    <div class="route-step-actions">
+                        <a href="{current_url}" target="_blank" rel="noopener">從目前位置導航</a>
+                        <a href="{maps_url}" target="_blank" rel="noopener">完整路線</a>
+                    </div>
                 </div>
             </div>
             """,
@@ -1691,11 +1710,32 @@ def inject_app_style() -> None:
         }
 
         .route-step-address {
-            color: #0f6b7a !important;
+            color: #0f6b7a;
             font-weight: 800;
-            text-decoration: underline;
-            text-underline-offset: 3px;
             overflow-wrap: anywhere;
+        }
+
+        .route-step-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.45rem;
+            margin-top: 0.55rem;
+        }
+
+        .route-step-actions a {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 2.35rem;
+            padding: 0.45rem 0.78rem;
+            border-radius: 999px;
+            background: #fff8dc;
+            border: 2px solid #f8d89a;
+            color: #0f5d6b !important;
+            font-size: 0.88rem;
+            font-weight: 900;
+            text-decoration: none !important;
+            box-shadow: 0 4px 0 rgba(142, 120, 76, 0.12);
         }
 
         .planner-menu-grid {
