@@ -1347,7 +1347,10 @@ def inject_app_style() -> None:
             height: 10px;
             background: rgba(255, 165, 190, 0.72);
             border-radius: 50%;
-            z-index: 5;
+            z-index: 5;destination = f'{row["brand"]} {row["name"]} {row["address"]}'brand = row.get("brand", row.get("型態", "家樂福超市"))
+    name = row.get("name", row.get("門市", ""))
+    address = row.get("address", row.get("地址", ""))
+    destination = f"{brand} {name} {address}".strip()
         }
 
         .cat-blush.left {
