@@ -95,7 +95,20 @@ DISTRICT_CENTERS = {
 
 def inject_style() -> None:
     st.markdown("""<style>
-    .stApp{background:#bdeee8;background-image:radial-gradient(#e9f7b8 18%,transparent 19%),radial-gradient(#8edbd4 18%,transparent 19%);background-size:44px 44px;background-position:0 0,22px 22px;color:#215466}.block-container{max-width:980px;padding-top:1rem}.k-card{background:rgba(255,252,225,.92);border:6px solid white;border-radius:32px;padding:20px;margin:14px 0;box-shadow:0 14px 0 rgba(89,128,85,.16)}.k-title{font-size:34px;font-weight:900;color:#0b5870;margin:0}.pill{display:inline-block;background:white;border:2px solid #ffd98f;border-radius:999px;padding:7px 13px;margin:4px;color:#13526b;font-weight:800}.route-card{background:white;border-radius:24px;padding:16px;margin:12px 0;box-shadow:0 8px 0 rgba(70,110,90,.13)}.task{color:#ba5a7b;font-weight:800}.small{color:#668;line-height:1.7}.stButton>button,.stDownloadButton>button{border-radius:999px!important;border:3px solid white!important;background:#ff9f1a!important;color:white!important;font-weight:900!important;box-shadow:0 6px 0 rgba(117,83,28,.18)!important}.stTextArea textarea{border-radius:24px!important;border:0!important;font-size:18px!important}.stDataFrame{border-radius:20px;overflow:hidden}@media(max-width:700px){.k-title{font-size:28px}.block-container{padding-left:12px;padding-right:12px}.k-card{border-radius:28px;padding:16px}}
+    @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@700;800;900&display=swap');
+    :root{--ink:#4b3b7a;--pink:#ff8fa3;--peach:#ffc0a8;--cream:#fff8e8;--lav:#efe6ff;--sky:#dff7ff;--mint:#dff6df;--shadow:rgba(97,69,124,.16)}
+    .stApp{background:linear-gradient(135deg,#fff7df 0%,#ffe8f2 35%,#e8f4ff 70%,#f2e8ff 100%);background-image:radial-gradient(circle at 12% 18%,rgba(255,255,255,.75) 0 34px,transparent 35px),radial-gradient(circle at 24% 28%,rgba(255,255,255,.58) 0 25px,transparent 26px),radial-gradient(circle at 83% 23%,rgba(255,255,255,.70) 0 38px,transparent 39px),radial-gradient(circle at 93% 35%,rgba(255,255,255,.50) 0 28px,transparent 29px),linear-gradient(135deg,#fff7df 0%,#ffe8f2 35%,#e8f4ff 70%,#f2e8ff 100%);color:#54456d}
+    .block-container{max-width:1080px;padding-top:1.1rem;padding-bottom:3rem;font-family:"Nunito","Microsoft JhengHei",sans-serif}
+    .k-card,.route-card,.stDataFrame,.stDataEditor{background:rgba(255,250,239,.88);border:6px solid rgba(255,255,255,.92);border-radius:34px;padding:22px;margin:16px 0;box-shadow:0 18px 30px var(--shadow),0 8px 0 rgba(255,189,203,.18);backdrop-filter:blur(10px)}
+    .k-hero{position:relative;overflow:hidden;min-height:310px;padding:24px 30px 30px;border:8px solid rgba(255,255,255,.95);border-radius:42px;background:radial-gradient(circle at 18% 30%,rgba(255,255,255,.95) 0 70px,transparent 72px),radial-gradient(circle at 82% 26%,rgba(255,255,255,.82) 0 74px,transparent 76px),linear-gradient(135deg,#fff1e6 0%,#ffe6f0 42%,#eef3ff 100%);box-shadow:0 22px 38px rgba(118,83,145,.18),0 12px 0 rgba(255,195,117,.16)}
+    .k-hero:before{content:"";position:absolute;inset:0;background-image:radial-gradient(#ffe7aa 0 6px,transparent 7px),radial-gradient(#ffc6d4 0 5px,transparent 6px);background-size:82px 82px,118px 118px;background-position:12px 18px,44px 56px;opacity:.55;pointer-events:none}
+    .k-hero:after{content:"";position:absolute;right:36px;bottom:38px;width:205px;height:112px;background:radial-gradient(circle at 28% 60%,#fff 0 36px,transparent 37px),radial-gradient(circle at 48% 43%,#fff 0 45px,transparent 46px),radial-gradient(circle at 70% 58%,#fff 0 38px,transparent 39px);filter:drop-shadow(0 15px 16px rgba(174,118,153,.18));opacity:.9}
+    .k-nav{position:relative;z-index:2;text-align:right;margin-bottom:22px}.nav-pill,.pill{display:inline-block;background:rgba(255,255,255,.78);border:3px solid #ffd7a8;border-radius:999px;padding:9px 18px;margin:5px;color:#4b3b7a;font-weight:900;box-shadow:0 6px 14px rgba(174,118,153,.12)}
+    .hero-copy{position:relative;z-index:2;max-width:650px;text-align:center;margin:auto}.k-title,.hero-title{font-size:56px;line-height:1.05;font-weight:900;color:#6642a5;margin:12px 0 10px;text-shadow:0 5px 0 rgba(255,255,255,.82)}.hero-title span{display:block;color:#ff8297}.hero-tag{display:inline-block;background:#ff8fa3;color:white;border:4px solid white;border-radius:999px;padding:10px 18px;font-weight:900;box-shadow:0 10px 16px rgba(255,143,163,.28)}.small,.hero-sub{color:#6e657c;line-height:1.75;font-size:17px;font-weight:700}.sparkles{font-size:26px;color:#ffd56c;letter-spacing:10px;margin:8px 0}
+    h1,h2,h3,.stMarkdown strong{color:#4b3b7a!important}.task{color:#ec6f92;font-weight:900}.stButton>button,.stDownloadButton>button{border-radius:999px!important;border:4px solid white!important;background:linear-gradient(135deg,#ff9aa8,#ffb06f)!important;color:white!important;font-weight:900!important;box-shadow:0 9px 0 rgba(183,107,88,.18),0 14px 24px rgba(255,143,163,.25)!important;min-height:3.1rem!important}.stButton>button:hover{transform:translateY(-1px)}
+    .stTextArea textarea,.stTextInput input{border-radius:28px!important;border:4px solid rgba(255,255,255,.86)!important;background:rgba(255,255,255,.86)!important;box-shadow:inset 0 0 0 1px rgba(255,183,201,.22),0 10px 24px rgba(110,86,140,.09)!important;font-size:18px!important;color:#54456d!important}.stExpander{border:0!important}.stExpander details{background:rgba(255,250,239,.82)!important;border:4px solid rgba(255,255,255,.9)!important;border-radius:28px!important;box-shadow:0 12px 26px rgba(97,69,124,.11)!important}
+    [data-testid="stMetric"],[data-testid="stAlert"]{border-radius:28px!important}.stDataFrame,.stDataEditor{overflow:hidden;padding:0}.stDataFrame [role="grid"],.stDataEditor [role="grid"]{border-radius:26px!important;overflow:hidden}.element-container:has(.route-card){margin-bottom:.4rem}
+    @media(max-width:700px){.block-container{padding-left:10px;padding-right:10px}.k-hero{min-height:300px;border-radius:30px;padding:16px 12px 24px}.k-nav{text-align:center;margin-bottom:10px}.nav-pill{padding:8px 12px;margin:3px;font-size:13px}.hero-title,.k-title{font-size:34px}.k-hero:after{right:-8px;bottom:12px;width:145px;height:82px;opacity:.55}.k-card,.route-card{border-radius:28px;padding:16px}.small,.hero-sub{font-size:15px}}
     </style>""", unsafe_allow_html=True)
 
 
@@ -381,7 +394,25 @@ def main() -> None:
     if "today_text" not in st.session_state:
         st.session_state["today_text"] = "\n".join(load_pending())
 
-    st.markdown('<div class="k-card"><div class="pill">Route Mew</div><h1 class="k-title">今天跑哪幾家，喵一下排好</h1><p class="small">出發與返回：台北市萬華區艋舺大道297號。支援收退貨品項與臨時交辦(拍照)。</p></div>', unsafe_allow_html=True)
+    st.markdown(
+        """
+        <div class="k-hero">
+          <div class="k-nav">
+            <span class="nav-pill">今日清單</span>
+            <span class="nav-pill">門市挑選</span>
+            <span class="nav-pill">路線結果</span>
+            <span class="nav-pill">LINE 文字</span>
+          </div>
+          <div class="hero-copy">
+            <div class="hero-tag">Route Mew Planner</div>
+            <div class="sparkles">★ ✦ ★</div>
+            <h1 class="hero-title">今天跑哪幾家<span>喵一下排好</span></h1>
+            <p class="hero-sub">從艋舺大道出發與返回。貼上清單或勾選門市後，自動整理收退貨、拍照、臨時事件與最順路線。</p>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     raw = st.text_area("今日清單", key="today_text", height=180, placeholder="台北長安東店 台糖頌精\n樹林學成店\n臨時交辦(拍照)")
     col_a, col_b = st.columns(2)
     with col_a:
