@@ -122,16 +122,73 @@ def build_stores() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def merge_task(existing: str, extra: str) -> str:
+    parts = [part.strip() for part in f"{existing}；{extra}".split("；") if part.strip()]
+    merged = []
+    for part in parts:
+        if part not in merged:
+            merged.append(part)
+    return "；".join(merged)
+
+
 def parse_line(line: str) -> tuple[str, str]:
-    task = ""
-    if "臨時交辦" in line or "拍照" in line:
-        task = "臨時交辦(拍照)"
+    tasks = []
     if "收退貨" in line or "退貨" in line:
         match = re.search(r"(?:收退貨|退貨)\s*[：:]?\s*(.+)$", line)
-        item = match.group(1).strip(" ：:") if match else ""
-        task = f"收退貨：{item}" if item else "收退貨"
-    name = re.split(r"收退貨|退貨|臨時交辦|拍照|[|｜]", line)[0].strip()
-    return name, task
+        item = match.group(1).strip(" ：:、,，") if match else ""
+        item = re.sub(r"(拍照|臨時事件|臨時交辦)", "", item).strip(" ：:、,，")
+        tasks.append(f"收退貨：{item}" if item else "收退貨")
+    if "拍照" in line:
+        tasks.append("拍照")
+    if "臨時事件" in line or "臨時交辦" in line:
+        tasks.append("臨時事件")
+    name = re.split(r"收退貨|退貨|臨時事件|臨時交辦|拍照|[|｜]", line)[0].strip()
+    return name, "；".join(tasks)
+
+
+def build_picker_line(name: str, return_task: bool, photo_task: bool, urgent_task: bool) -> str:
+    tasks = []
+    if return_task:
+        tasks.append("收退貨")
+    if photo_task:
+        tasks.append("拍照")
+    if urgent_task:
+        tasks.append("臨時事件")
+    return f"{name} {' '.join(tasks)}" if tasks else name
+
+
+def sync_store_picker_to_text() -> None:
+    picker_state = st.session_state.get("store_picker_editor", {})
+    base_rows = st.session_state.get("store_picker_rows", [])
+    edited_rows = picker_state.get("edited_rows", {}) if isinstance(picker_state, dict) else {}
+    selected = []
+    for raw_index, changes in edited_rows.items():
+        index = int(raw_index)
+        if index >= len(base_rows):
+            continue
+        row = dict(base_rows[index])
+        row.update(changes)
+        if row.get("收退貨") or row.get("拍照") or row.get("臨時事件"):
+            selected.append((
+                row["name"],
+                build_picker_line(row["name"], bool(row.get("收退貨")), bool(row.get("拍照")), bool(row.get("臨時事件"))),
+            ))
+    if not selected:
+        return
+
+    current_lines = [line.strip() for line in st.session_state.get("today_text", "").splitlines() if line.strip()]
+    by_name = {}
+    order = []
+    for line in current_lines:
+        name, _ = parse_line(line)
+        if name not in by_name:
+            order.append(name)
+        by_name[name] = line
+    for name, line in selected:
+        if name not in by_name:
+            order.append(name)
+        by_name[name] = line
+    st.session_state["today_text"] = "\n".join(by_name[name] for name in order if name in by_name)
 
 
 def best_match_store(line: str, stores: pd.DataFrame):
@@ -336,7 +393,29 @@ def main() -> None:
     with st.expander("門市挑選 / 查地址"):
         keyword = st.text_input("搜尋門市或地址")
         view = stores if not keyword else stores[stores["name"].str.contains(keyword, na=False) | stores["address"].str.contains(keyword, na=False)]
-        st.dataframe(view[["name", "region", "address"]], hide_index=True, width="stretch")
+        picker = view[["name", "brand", "region", "address"]].copy()
+        picker.insert(0, "收退貨", False)
+        picker.insert(1, "拍照", False)
+        picker.insert(2, "臨時事件", False)
+        st.session_state["store_picker_rows"] = picker.to_dict("records")
+        st.caption("勾選後會自動帶入上方今日清單；同一家可同時勾多個任務。")
+        st.data_editor(
+            picker,
+            key="store_picker_editor",
+            hide_index=True,
+            width="stretch",
+            disabled=["name", "brand", "region", "address"],
+            on_change=sync_store_picker_to_text,
+            column_config={
+                "收退貨": st.column_config.CheckboxColumn("收退貨"),
+                "拍照": st.column_config.CheckboxColumn("拍照"),
+                "臨時事件": st.column_config.CheckboxColumn("臨時事件"),
+                "name": st.column_config.TextColumn("門市"),
+                "brand": st.column_config.TextColumn("型態"),
+                "region": st.column_config.TextColumn("分區"),
+                "address": st.column_config.TextColumn("地址"),
+            },
+        )
 
     matched, misses = match_inputs(raw, stores)
     if not start_plan:
