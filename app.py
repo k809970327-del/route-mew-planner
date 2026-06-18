@@ -222,12 +222,13 @@ def match_inputs(text: str, stores: pd.DataFrame) -> tuple[pd.DataFrame, list[st
         line = raw.strip()
         if not line:
             continue
-        if last_idx is not None and ("臨時交辦" in line or "拍照" in line):
-            result[last_idx]["任務"] = "臨時交辦(拍照)"
+        if last_idx is not None and ("臨時事件" in line or "臨時交辦" in line or "拍照" in line):
+            _, task = parse_line(line)
+            result[last_idx]["任務"] = merge_task(result[last_idx].get("任務", ""), task or "臨時事件")
             continue
         if last_idx is not None and not any(word in line for word in ["店", "家樂福", "收退貨", "退貨"]) and len(line) <= 24:
             old = result[last_idx].get("任務", "")
-            result[last_idx]["任務"] = f"收退貨：{line}" if not old or "收退貨" in old else f"{old}；收退貨：{line}"
+            result[last_idx]["任務"] = merge_task(old, f"收退貨：{line}")
             continue
         row, task, score = best_match_store(line, stores)
         if row is not None:
