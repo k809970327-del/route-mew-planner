@@ -271,32 +271,63 @@ def match_inputs(text: str, stores: pd.DataFrame) -> tuple[pd.DataFrame, list[st
     return df.drop_duplicates("item_id").reset_index(drop=True), misses
 
 
-def remaining_lines_after_done(text: str, stores: pd.DataFrame, done_item_ids: set[str]) -> list[str]:
-    matched, _ = match_inputs(text, stores)
-    done_input_names = set()
-    if not matched.empty:
-        done_input_names = set(
-            matched.loc[matched["item_id"].isin(done_item_ids), "input_name"].astype(str).str.strip()
-        )
-    remaining = []
-    current_done = False
+def input_entries(text: str, stores: pd.DataFrame) -> list[dict]:
+    entries = []
+    current = None
     for raw in text.splitlines():
         line = raw.strip()
         if not line:
             continue
-        row, _, _ = best_match_store(line, stores)
+        if current and current.get("row") is not None and ("臨時事件" in line or "臨時交辦" in line or "拍照" in line):
+            _, task = parse_line(line)
+            current["task"] = merge_task(current.get("task", ""), task or "臨時事件")
+            current["lines"].append(line)
+            continue
+        if current and current.get("row") is not None and not any(word in line for word in ["店", "家樂福", "收退貨", "退貨"]) and len(line) <= 24:
+            current["task"] = merge_task(current.get("task", ""), f"收退貨：{line}")
+            current["lines"].append(line)
+            continue
+        row, task, _ = best_match_store(line, stores)
         if row is not None:
-            current_done = line in done_input_names
-        if not current_done:
-            remaining.append(line)
+            current = {"lines": [line], "row": row, "task": task, "input_name": line}
+        else:
+            current = {"lines": [line], "row": None, "task": "", "input_name": line}
+        entries.append(current)
+
+    for entry in entries:
+        row = entry.get("row")
+        if row is None:
+            continue
+        entry["item_id"] = make_item_id(row.get("name", ""), row.get("address", ""), entry.get("task", ""), entry.get("input_name", ""))
+        entry["signature"] = (row.get("name", ""), row.get("address", ""), entry.get("task", ""))
+    return entries
+
+
+def remaining_lines_after_done(
+    text: str,
+    stores: pd.DataFrame,
+    done_item_ids: set[str],
+    done_signatures: set[tuple[str, str, str]] | None = None,
+) -> list[str]:
+    done_signatures = done_signatures or set()
+    remaining = []
+    for entry in input_entries(text, stores):
+        is_done = entry.get("item_id") in done_item_ids or entry.get("signature") in done_signatures
+        if not is_done:
+            remaining.extend(entry["lines"])
     return remaining
 
 
-def complete_and_save(raw_text: str, stores: pd.DataFrame, done_item_ids: set[str]) -> None:
+def complete_and_save(
+    raw_text: str,
+    stores: pd.DataFrame,
+    done_item_ids: set[str],
+    done_signatures: set[tuple[str, str, str]] | None = None,
+) -> None:
     completed = set(st.session_state.get("completed_item_ids", []))
     completed.update(done_item_ids)
     st.session_state["completed_item_ids"] = sorted(completed)
-    remaining = remaining_lines_after_done(raw_text, stores, done_item_ids)
+    remaining = remaining_lines_after_done(raw_text, stores, done_item_ids, done_signatures)
     save_pending(remaining)
     updated_text = "\n".join(remaining)
     st.session_state["today_text"] = updated_text
@@ -571,7 +602,7 @@ def main() -> None:
             st.link_button(f"導航到 {row['門市']}", single_maps_url(source, True), width="stretch")
         with done_col:
             if st.button(f"完成 {row['門市']}", key=f"done_{row['item_id']}", width="stretch"):
-                complete_and_save(raw, stores, {row["item_id"]})
+                complete_and_save(raw, stores, {row["item_id"]}, {(row["門市"], row["地址"], row.get("任務", ""))})
 
     st.dataframe(table.drop(columns=["item_id"], errors="ignore"), hide_index=True, width="stretch")
     status = table[["item_id", "門市", "任務", "分區", "地址"]].copy()
@@ -585,7 +616,9 @@ def main() -> None:
     )
     done = set(edited[edited["已完成"]]["item_id"].tolist())
     if done:
-        complete_and_save(raw, stores, done)
+        done_rows = edited[edited["item_id"].isin(done)]
+        done_signatures = set(zip(done_rows["門市"], done_rows["地址"], done_rows["任務"]))
+        complete_and_save(raw, stores, done, done_signatures)
 
     st.markdown('<div class="k-card"><b>LINE 文字</b></div>', unsafe_allow_html=True)
     st.code(line_text(route, table, km, mins, full_url), language="text")
