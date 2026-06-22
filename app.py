@@ -427,7 +427,7 @@ def main() -> None:
             <span class="nav-pill">LINE 文字</span>
           </div>
           <div class="hero-copy">
-            <div class="hero-tag">Route Mew Planner</div>
+            <div class="hero-tag">完成按鈕版 2026-06-22</div>
             <div class="sparkles">★ ✦ ★</div>
             <h1 class="hero-title">今天跑哪幾家<span>喵一下排好</span></h1>
             <p class="hero-sub">從艋舺大道出發與返回。貼上清單或勾選門市後，自動整理收退貨、拍照、臨時事件與最順路線。</p>
