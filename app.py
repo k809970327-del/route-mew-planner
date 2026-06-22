@@ -255,6 +255,29 @@ def match_inputs(text: str, stores: pd.DataFrame) -> tuple[pd.DataFrame, list[st
     return pd.DataFrame(result).drop_duplicates("name") if result else pd.DataFrame(), misses
 
 
+def remaining_lines_after_done(text: str, stores: pd.DataFrame, done_names: set[str]) -> list[str]:
+    remaining = []
+    current_done = False
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        row, _, _ = best_match_store(line, stores)
+        if row is not None:
+            current_done = row["name"] in done_names
+        if not current_done:
+            remaining.append(line)
+    return remaining
+
+
+def complete_and_save(raw_text: str, stores: pd.DataFrame, done_names: set[str]) -> None:
+    remaining = remaining_lines_after_done(raw_text, stores, done_names)
+    save_pending(remaining)
+    st.session_state["today_text"] = "\n".join(remaining)
+    st.success(f"已自動保存剩餘 {len(remaining)} 筆。")
+    st.rerun()
+
+
 def haversine(a_lat, a_lon, b_lat, b_lon) -> float:
     radius = 6371
     p1, p2 = math.radians(a_lat), math.radians(b_lat)
@@ -479,7 +502,12 @@ def main() -> None:
     for _, row in table.iterrows():
         source = route[route["name"] == row["門市"]].iloc[0]
         st.markdown(f'<div class="route-card"><b>{row["順序"]}. {html.escape(row["門市"])}</b><div class="task">{html.escape(str(row.get("任務", "")))}</div><div>{row["抵達"]} - {row["離開"]}</div><div>{html.escape(row["地址"])}</div></div>', unsafe_allow_html=True)
-        st.link_button(f"導航到 {row['門市']}", single_maps_url(source, True), width="stretch")
+        nav_col, done_col = st.columns([2, 1])
+        with nav_col:
+            st.link_button(f"導航到 {row['門市']}", single_maps_url(source, True), width="stretch")
+        with done_col:
+            if st.button(f"完成 {row['門市']}", key=f"done_{row['門市']}", width="stretch"):
+                complete_and_save(raw, stores, {row["門市"]})
 
     st.dataframe(table, hide_index=True, width="stretch")
     status = table[["門市", "任務", "分區", "地址"]].copy()
@@ -487,9 +515,7 @@ def main() -> None:
     edited = st.data_editor(status, hide_index=True, width="stretch", disabled=["門市", "任務", "分區", "地址"])
     done = set(edited[edited["已完成"]]["門市"].tolist())
     if done:
-        remain = [line.strip() for line in raw.splitlines() if line.strip() and not any(name in line for name in done)]
-        save_pending(remain)
-        st.success(f"已自動保存剩餘 {len(remain)} 筆。")
+        complete_and_save(raw, stores, done)
 
     st.markdown('<div class="k-card"><b>LINE 文字</b></div>', unsafe_allow_html=True)
     st.code(line_text(route, table, km, mins, full_url), language="text")
