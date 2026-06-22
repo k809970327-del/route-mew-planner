@@ -201,7 +201,9 @@ def sync_store_picker_to_text() -> None:
         if name not in by_name:
             order.append(name)
         by_name[name] = line
-    st.session_state["today_text"] = "\n".join(by_name[name] for name in order if name in by_name)
+    updated_text = "\n".join(by_name[name] for name in order if name in by_name)
+    st.session_state["today_text"] = updated_text
+    st.session_state["today_text_input"] = updated_text
 
 
 def best_match_store(line: str, stores: pd.DataFrame):
@@ -273,8 +275,10 @@ def remaining_lines_after_done(text: str, stores: pd.DataFrame, done_names: set[
 def complete_and_save(raw_text: str, stores: pd.DataFrame, done_names: set[str]) -> None:
     remaining = remaining_lines_after_done(raw_text, stores, done_names)
     save_pending(remaining)
-    st.session_state["today_text"] = "\n".join(remaining)
-    st.success(f"已自動保存剩餘 {len(remaining)} 筆。")
+    updated_text = "\n".join(remaining)
+    st.session_state["today_text"] = updated_text
+    st.session_state["today_text_override"] = updated_text
+    st.session_state["done_flash"] = f"已自動保存剩餘 {len(remaining)} 筆。"
     st.rerun()
 
 
@@ -416,6 +420,11 @@ def main() -> None:
     stores = build_stores()
     if "today_text" not in st.session_state:
         st.session_state["today_text"] = "\n".join(load_pending())
+    if "today_text_override" in st.session_state:
+        st.session_state["today_text"] = st.session_state.pop("today_text_override")
+        st.session_state["today_text_input"] = st.session_state["today_text"]
+    if "today_text_input" not in st.session_state:
+        st.session_state["today_text_input"] = st.session_state["today_text"]
 
     st.markdown(
         """
@@ -427,7 +436,7 @@ def main() -> None:
             <span class="nav-pill">LINE 文字</span>
           </div>
           <div class="hero-copy">
-            <div class="hero-tag">完成按鈕版 2026-06-22</div>
+            <div class="hero-tag">完成按鈕修正版 2026-06-22</div>
             <div class="sparkles">★ ✦ ★</div>
             <h1 class="hero-title">今天跑哪幾家<span>喵一下排好</span></h1>
             <p class="hero-sub">從艋舺大道出發與返回。貼上清單或勾選門市後，自動整理收退貨、拍照、臨時事件與最順路線。</p>
@@ -436,13 +445,17 @@ def main() -> None:
         """,
         unsafe_allow_html=True,
     )
-    raw = st.text_area("今日清單", key="today_text", height=180, placeholder="台北長安東店 台糖頌精\n樹林學成店\n臨時交辦(拍照)")
+    if st.session_state.get("done_flash"):
+        st.success(st.session_state.pop("done_flash"))
+    raw = st.text_area("今日清單", key="today_text_input", height=180, placeholder="台北長安東店 台糖頌精\n樹林學成店\n臨時交辦(拍照)")
+    st.session_state["today_text"] = raw
     col_a, col_b = st.columns(2)
     with col_a:
         start_plan = st.button("開始規劃今日路線", type="primary", width="stretch")
     with col_b:
         if st.button("清空清單", width="stretch"):
             st.session_state["today_text"] = ""
+            st.session_state["today_text_input"] = ""
             st.rerun()
 
     with st.expander("門市挑選 / 查地址"):
