@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import html
+import hashlib
+import json
 import math
 import re
 import urllib.parse
@@ -21,6 +23,11 @@ DEFAULT_STOP_MINUTES = 25
 PENDING_FILE = Path(__file__).with_name("pending_store_list.json")
 EXCLUDED_DISTRICTS = {"基隆市", "汐止區", "淡水區", "林口區", "深坑區"}
 STORE_ALIASES = {"台北西藏店": "萬華西藏店", "西藏店": "萬華西藏店"}
+
+
+def make_item_id(name: str, address: str, task: str = "", input_name: str = "") -> str:
+    raw = "|".join(str(part).strip() for part in [name, address, task, input_name])
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
 RAW_STORES = [
     ("北投公館店", "台北市北投區公舘路198號"), ("北投致遠一店", "台北市北投區致遠一路二段19、21、23號"),
@@ -203,7 +210,7 @@ def sync_store_picker_to_text() -> None:
         by_name[name] = line
     updated_text = "\n".join(by_name[name] for name in order if name in by_name)
     st.session_state["today_text"] = updated_text
-    st.session_state["today_text_input"] = updated_text
+    st.session_state["today_text_key_version"] = st.session_state.get("today_text_key_version", 0) + 1
 
 
 def best_match_store(line: str, stores: pd.DataFrame):
@@ -254,10 +261,23 @@ def match_inputs(text: str, stores: pd.DataFrame) -> tuple[pd.DataFrame, list[st
         else:
             misses.append(line)
             last_idx = None
-    return pd.DataFrame(result).drop_duplicates("name") if result else pd.DataFrame(), misses
+    if not result:
+        return pd.DataFrame(), misses
+    df = pd.DataFrame(result)
+    df["item_id"] = df.apply(
+        lambda row: make_item_id(row.get("name", ""), row.get("address", ""), row.get("任務", ""), row.get("input_name", "")),
+        axis=1,
+    )
+    return df.drop_duplicates("item_id").reset_index(drop=True), misses
 
 
-def remaining_lines_after_done(text: str, stores: pd.DataFrame, done_names: set[str]) -> list[str]:
+def remaining_lines_after_done(text: str, stores: pd.DataFrame, done_item_ids: set[str]) -> list[str]:
+    matched, _ = match_inputs(text, stores)
+    done_input_names = set()
+    if not matched.empty:
+        done_input_names = set(
+            matched.loc[matched["item_id"].isin(done_item_ids), "input_name"].astype(str).str.strip()
+        )
     remaining = []
     current_done = False
     for raw in text.splitlines():
@@ -266,18 +286,21 @@ def remaining_lines_after_done(text: str, stores: pd.DataFrame, done_names: set[
             continue
         row, _, _ = best_match_store(line, stores)
         if row is not None:
-            current_done = row["name"] in done_names
+            current_done = line in done_input_names
         if not current_done:
             remaining.append(line)
     return remaining
 
 
-def complete_and_save(raw_text: str, stores: pd.DataFrame, done_names: set[str]) -> None:
-    remaining = remaining_lines_after_done(raw_text, stores, done_names)
+def complete_and_save(raw_text: str, stores: pd.DataFrame, done_item_ids: set[str]) -> None:
+    completed = set(st.session_state.get("completed_item_ids", []))
+    completed.update(done_item_ids)
+    st.session_state["completed_item_ids"] = sorted(completed)
+    remaining = remaining_lines_after_done(raw_text, stores, done_item_ids)
     save_pending(remaining)
     updated_text = "\n".join(remaining)
     st.session_state["today_text"] = updated_text
-    st.session_state["today_text_override"] = updated_text
+    st.session_state["today_text_key_version"] = st.session_state.get("today_text_key_version", 0) + 1
     st.session_state["done_flash"] = f"已自動保存剩餘 {len(remaining)} 筆。"
     st.rerun()
 
@@ -336,7 +359,17 @@ def build_timeline(route: pd.DataFrame, start: time, stop_minutes: int, speed: i
         cursor += timedelta(minutes=mins)
         arrive = cursor
         leave = arrive + timedelta(minutes=stop_minutes)
-        rows.append({"順序": idx + 1, "門市": row["name"], "任務": row.get("任務", ""), "分區": row["region"], "地址": row["address"], "抵達": arrive.strftime("%H:%M"), "離開": leave.strftime("%H:%M"), "公里": round(km, 1)})
+        rows.append({
+            "item_id": row.get("item_id", make_item_id(row["name"], row["address"], row.get("任務", ""), row.get("input_name", ""))),
+            "順序": idx + 1,
+            "門市": row["name"],
+            "任務": row.get("任務", ""),
+            "分區": row["region"],
+            "地址": row["address"],
+            "抵達": arrive.strftime("%H:%M"),
+            "離開": leave.strftime("%H:%M"),
+            "公里": round(km, 1),
+        })
         cursor = leave
         total_km += km
         total_min += mins + stop_minutes
@@ -371,10 +404,19 @@ def load_pending() -> list[str]:
                 return [str(item) for item in response.json()[0].get("entries", []) if str(item).strip()]
         except Exception:
             pass
+    try:
+        if PENDING_FILE.exists():
+            return [str(item) for item in json.loads(PENDING_FILE.read_text(encoding="utf-8")) if str(item).strip()]
+    except Exception:
+        pass
     return []
 
 
 def save_pending(entries: list[str]) -> None:
+    try:
+        PENDING_FILE.write_text(json.dumps(entries, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
     url, key, user_id = supabase_settings()
     if not (url and key):
         return
@@ -420,11 +462,10 @@ def main() -> None:
     stores = build_stores()
     if "today_text" not in st.session_state:
         st.session_state["today_text"] = "\n".join(load_pending())
-    if "today_text_override" in st.session_state:
-        st.session_state["today_text"] = st.session_state.pop("today_text_override")
-        st.session_state["today_text_input"] = st.session_state["today_text"]
-    if "today_text_input" not in st.session_state:
-        st.session_state["today_text_input"] = st.session_state["today_text"]
+    if "today_text_key_version" not in st.session_state:
+        st.session_state["today_text_key_version"] = 0
+    if "completed_item_ids" not in st.session_state:
+        st.session_state["completed_item_ids"] = []
 
     st.markdown(
         """
@@ -447,7 +488,13 @@ def main() -> None:
     )
     if st.session_state.get("done_flash"):
         st.success(st.session_state.pop("done_flash"))
-    raw = st.text_area("今日清單", key="today_text_input", height=180, placeholder="台北長安東店 台糖頌精\n樹林學成店\n臨時交辦(拍照)")
+    raw = st.text_area(
+        "今日清單",
+        value=st.session_state["today_text"],
+        key=f"today_text_input_{st.session_state['today_text_key_version']}",
+        height=180,
+        placeholder="台北長安東店 台糖頌精\n樹林學成店\n臨時交辦(拍照)",
+    )
     st.session_state["today_text"] = raw
     col_a, col_b = st.columns(2)
     with col_a:
@@ -455,7 +502,8 @@ def main() -> None:
     with col_b:
         if st.button("清空清單", width="stretch"):
             st.session_state["today_text"] = ""
-            st.session_state["today_text_input"] = ""
+            st.session_state["completed_item_ids"] = []
+            st.session_state["today_text_key_version"] = st.session_state.get("today_text_key_version", 0) + 1
             st.rerun()
 
     with st.expander("門市挑選 / 查地址"):
@@ -486,6 +534,9 @@ def main() -> None:
         )
 
     matched, misses = match_inputs(raw, stores)
+    completed_ids = set(st.session_state.get("completed_item_ids", []))
+    if not matched.empty and completed_ids:
+        matched = matched[~matched["item_id"].isin(completed_ids)].reset_index(drop=True)
     if not start_plan:
         if raw.strip():
             st.markdown('<div class="k-card"><b>比對預覽</b></div>', unsafe_allow_html=True)
@@ -513,20 +564,26 @@ def main() -> None:
     st.link_button("從艋舺大道出發導航", full_url, width="stretch")
 
     for _, row in table.iterrows():
-        source = route[route["name"] == row["門市"]].iloc[0]
+        source = route[route["item_id"] == row["item_id"]].iloc[0]
         st.markdown(f'<div class="route-card"><b>{row["順序"]}. {html.escape(row["門市"])}</b><div class="task">{html.escape(str(row.get("任務", "")))}</div><div>{row["抵達"]} - {row["離開"]}</div><div>{html.escape(row["地址"])}</div></div>', unsafe_allow_html=True)
         nav_col, done_col = st.columns([2, 1])
         with nav_col:
             st.link_button(f"導航到 {row['門市']}", single_maps_url(source, True), width="stretch")
         with done_col:
-            if st.button(f"完成 {row['門市']}", key=f"done_{row['門市']}", width="stretch"):
-                complete_and_save(raw, stores, {row["門市"]})
+            if st.button(f"完成 {row['門市']}", key=f"done_{row['item_id']}", width="stretch"):
+                complete_and_save(raw, stores, {row["item_id"]})
 
-    st.dataframe(table, hide_index=True, width="stretch")
-    status = table[["門市", "任務", "分區", "地址"]].copy()
+    st.dataframe(table.drop(columns=["item_id"], errors="ignore"), hide_index=True, width="stretch")
+    status = table[["item_id", "門市", "任務", "分區", "地址"]].copy()
     status.insert(0, "已完成", False)
-    edited = st.data_editor(status, hide_index=True, width="stretch", disabled=["門市", "任務", "分區", "地址"])
-    done = set(edited[edited["已完成"]]["門市"].tolist())
+    edited = st.data_editor(
+        status,
+        hide_index=True,
+        width="stretch",
+        disabled=["item_id", "門市", "任務", "分區", "地址"],
+        column_config={"item_id": None},
+    )
+    done = set(edited[edited["已完成"]]["item_id"].tolist())
     if done:
         complete_and_save(raw, stores, done)
 
