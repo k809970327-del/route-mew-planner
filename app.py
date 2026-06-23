@@ -26,7 +26,7 @@ STORE_ALIASES = {"台北西藏店": "萬華西藏店", "西藏店": "萬華西�
 
 
 def make_item_id(name: str, address: str, task: str = "", input_name: str = "") -> str:
-    raw = "|".join(str(part).strip() for part in [name, address, task, input_name])
+    raw = "|".join(str(part).strip() for part in [name, address, task])
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
 RAW_STORES = [
@@ -318,6 +318,44 @@ def remaining_lines_after_done(
     return remaining
 
 
+def today_widget_key() -> str:
+    return f"today_text_input_{st.session_state.get('today_text_key_version', 0)}"
+
+
+def clear_today_text_widget_state() -> None:
+    for key in list(st.session_state.keys()):
+        if str(key).startswith("today_text_input_"):
+            del st.session_state[key]
+
+
+def current_today_text(raw_text: str = "") -> str:
+    widget_value = st.session_state.get(today_widget_key())
+    if isinstance(widget_value, str):
+        return widget_value
+    session_value = st.session_state.get("today_text")
+    if isinstance(session_value, str):
+        return session_value
+    return raw_text
+
+
+def filter_completed_from_today_text(
+    raw_text: str,
+    stores: pd.DataFrame,
+    completed_item_ids: set[str],
+) -> str:
+    if not raw_text.strip() or not completed_item_ids:
+        return raw_text
+    return "\n".join(remaining_lines_after_done(raw_text, stores, completed_item_ids))
+
+
+def sync_today_text(text: str, save: bool = False) -> None:
+    st.session_state["today_text"] = text
+    st.session_state["today_text_key_version"] = st.session_state.get("today_text_key_version", 0) + 1
+    st.session_state["clear_today_text_widget_state"] = True
+    if save:
+        save_pending([line.strip() for line in text.splitlines() if line.strip()])
+
+
 def complete_and_save(
     raw_text: str,
     stores: pd.DataFrame,
@@ -327,11 +365,11 @@ def complete_and_save(
     completed = set(st.session_state.get("completed_item_ids", []))
     completed.update(done_item_ids)
     st.session_state["completed_item_ids"] = sorted(completed)
-    remaining = remaining_lines_after_done(raw_text, stores, done_item_ids, done_signatures)
+    source_text = current_today_text(raw_text)
+    remaining = remaining_lines_after_done(source_text, stores, completed, done_signatures)
     save_pending(remaining)
     updated_text = "\n".join(remaining)
-    st.session_state["today_text"] = updated_text
-    st.session_state["today_text_key_version"] = st.session_state.get("today_text_key_version", 0) + 1
+    sync_today_text(updated_text)
     st.session_state["done_flash"] = f"已自動保存剩餘 {len(remaining)} 筆。"
     st.rerun()
 
@@ -426,26 +464,59 @@ def auth_headers(key: str) -> dict[str, str]:
     return {"apikey": key, "Authorization": f"Bearer {key}", "Content-Type": "application/json"}
 
 
-def load_pending() -> list[str]:
+def normalize_route_state_payload(payload) -> tuple[list[str], list[str]]:
+    if isinstance(payload, dict):
+        entries = payload.get("entries", [])
+        completed = payload.get("completed_item_ids", [])
+    else:
+        entries = payload
+        completed = []
+    if not isinstance(entries, list):
+        entries = []
+    if not isinstance(completed, list):
+        completed = []
+    clean_entries = [str(item) for item in entries if str(item).strip()]
+    clean_completed = [str(item) for item in completed if str(item).strip()]
+    return clean_entries, clean_completed
+
+
+def load_route_state() -> tuple[list[str], list[str]]:
     url, key, user_id = supabase_settings()
     if url and key:
         try:
             response = requests.get(f"{url}/rest/v1/route_state", headers=auth_headers(key), params={"user_id": f"eq.{user_id}", "select": "entries"}, timeout=8)
             if response.ok and response.json():
-                return [str(item) for item in response.json()[0].get("entries", []) if str(item).strip()]
+                return normalize_route_state_payload(response.json()[0].get("entries", []))
         except Exception:
             pass
     try:
         if PENDING_FILE.exists():
-            return [str(item) for item in json.loads(PENDING_FILE.read_text(encoding="utf-8")) if str(item).strip()]
+            data = json.loads(PENDING_FILE.read_text(encoding="utf-8"))
+            return normalize_route_state_payload(data)
     except Exception:
         pass
-    return []
+    return [], []
 
 
-def save_pending(entries: list[str]) -> None:
+def load_pending() -> list[str]:
+    entries, _ = load_route_state()
+    return entries
+
+
+def load_completed_item_ids() -> list[str]:
+    _, completed = load_route_state()
+    return completed
+
+
+def save_route_state(entries: list[str], completed_item_ids: list[str] | set[str] | None = None) -> None:
+    completed = sorted({str(item) for item in (completed_item_ids or []) if str(item).strip()})
+    payload = {
+        "updated_at": datetime.utcnow().isoformat(),
+        "entries": [str(item) for item in entries if str(item).strip()],
+        "completed_item_ids": completed,
+    }
     try:
-        PENDING_FILE.write_text(json.dumps(entries, ensure_ascii=False, indent=2), encoding="utf-8")
+        PENDING_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
         pass
     url, key, user_id = supabase_settings()
@@ -454,9 +525,13 @@ def save_pending(entries: list[str]) -> None:
     try:
         headers = auth_headers(key)
         headers["Prefer"] = "resolution=merge-duplicates,return=minimal"
-        requests.post(f"{url}/rest/v1/route_state", headers=headers, json={"user_id": user_id, "entries": entries, "updated_at": datetime.utcnow().isoformat()}, timeout=8)
+        requests.post(f"{url}/rest/v1/route_state", headers=headers, json={"user_id": user_id, "entries": payload, "updated_at": datetime.utcnow().isoformat()}, timeout=8)
     except Exception:
         pass
+
+
+def save_pending(entries: list[str]) -> None:
+    save_route_state(entries, st.session_state.get("completed_item_ids", []))
 
 
 def require_pin() -> None:
@@ -491,12 +566,21 @@ def main() -> None:
     inject_style()
     require_pin()
     stores = build_stores()
+    if "route_state_loaded" not in st.session_state:
+        pending_entries, completed_entries = load_route_state()
+        st.session_state["today_text"] = "\n".join(pending_entries)
+        st.session_state["completed_item_ids"] = completed_entries
+        st.session_state["route_state_loaded"] = True
     if "today_text" not in st.session_state:
-        st.session_state["today_text"] = "\n".join(load_pending())
+        st.session_state["today_text"] = ""
     if "today_text_key_version" not in st.session_state:
         st.session_state["today_text_key_version"] = 0
     if "completed_item_ids" not in st.session_state:
         st.session_state["completed_item_ids"] = []
+    if "planning_active" not in st.session_state:
+        st.session_state["planning_active"] = False
+    if st.session_state.pop("clear_today_text_widget_state", False):
+        clear_today_text_widget_state()
 
     st.markdown(
         """
@@ -522,19 +606,27 @@ def main() -> None:
     raw = st.text_area(
         "今日清單",
         value=st.session_state["today_text"],
-        key=f"today_text_input_{st.session_state['today_text_key_version']}",
+        key=today_widget_key(),
         height=180,
         placeholder="台北長安東店 台糖頌精\n樹林學成店\n臨時交辦(拍照)",
     )
     st.session_state["today_text"] = raw
+    completed_ids = set(st.session_state.get("completed_item_ids", []))
+    filtered_raw = filter_completed_from_today_text(raw, stores, completed_ids)
+    if filtered_raw != raw:
+        sync_today_text(filtered_raw, save=True)
+        st.rerun()
     col_a, col_b = st.columns(2)
     with col_a:
         start_plan = st.button("開始規劃今日路線", type="primary", width="stretch")
+        if start_plan:
+            st.session_state["planning_active"] = True
     with col_b:
         if st.button("清空清單", width="stretch"):
-            st.session_state["today_text"] = ""
             st.session_state["completed_item_ids"] = []
-            st.session_state["today_text_key_version"] = st.session_state.get("today_text_key_version", 0) + 1
+            st.session_state["planning_active"] = False
+            save_route_state([], [])
+            sync_today_text("")
             st.rerun()
 
     with st.expander("門市挑選 / 查地址"):
@@ -565,10 +657,9 @@ def main() -> None:
         )
 
     matched, misses = match_inputs(raw, stores)
-    completed_ids = set(st.session_state.get("completed_item_ids", []))
     if not matched.empty and completed_ids:
         matched = matched[~matched["item_id"].isin(completed_ids)].reset_index(drop=True)
-    if not start_plan:
+    if not st.session_state.get("planning_active", False):
         if raw.strip():
             st.markdown('<div class="k-card"><b>比對預覽</b></div>', unsafe_allow_html=True)
             if not matched.empty:
