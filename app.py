@@ -1,4 +1,6 @@
-/mnt/c/Users/user/Documents/跑店小幫手 2/web_deploy_ready/app.py
+from __future__ import annotations
+
+import html
 import hashlib
 import json
 import math
@@ -20,7 +22,11 @@ DEFAULT_SPEED_KMH = 35
 DEFAULT_STOP_MINUTES = 25
 PENDING_FILE = Path(__file__).with_name("pending_store_list.json")
 EXCLUDED_DISTRICTS = {"基隆市", "汐止區", "淡水區", "林口區", "深坑區"}
+INCLUDED_STORE_NAMES = {"汐止明峰店"}
 STORE_ALIASES = {"台北西藏店": "萬華西藏店", "西藏店": "萬華西藏店"}
+STORE_COORDS = {
+    "汐止明峰店": (25.0709795, 121.6312968),
+}
 
 
 def make_item_id(name: str, address: str, task: str = "", input_name: str = "") -> str:
@@ -78,6 +84,7 @@ RAW_STORES = [
     ("新莊後港一店", "新北市新莊區後港一路122-126號"), ("新莊富國店", "新北市新莊區富國路2號B1"),
     ("新莊龍安店", "新北市新莊區龍安路75號"), ("林口仁愛店", "新北市林口區仁愛路二段89號"),
     ("林口文化一店", "新北市林口區文化三路一段319、321、323、325號1樓"), ("林口文化三店", "新北市林口區文化三路一段543號"),
+    ("汐止明峰店", "新北市汐止區明峰街"),
     ("五股成泰店", "新北市五股區成泰路一段235號之4"), ("五股西雲店", "新北市五股區西雲路169-1、171、171-1號"),
     ("五股明德店", "新北市五股區明德路12巷5號"), ("泰山明志店", "新北市泰山區明志路二段95-97號"),
 ]
@@ -87,14 +94,14 @@ REGION_BY_DISTRICT = {
     "大安區": "台北東區", "中山區": "台北中區", "松山區": "台北東區", "信義區": "台北東區", "內湖區": "台北東區",
     "南港區": "台北東區", "文山區": "台北南區", "新店區": "新北南區", "土城區": "新北西南區", "永和區": "新北西南區",
     "中和區": "新北西南區", "板橋區": "新北西南區", "樹林區": "新北西南區", "三峽區": "新北西南區", "蘆洲區": "新北西區",
-    "三重區": "新北西區", "新莊區": "新北西區", "五股區": "新北西區", "泰山區": "新北西區",
+    "三重區": "新北西區", "新莊區": "新北西區", "汐止區": "新北東區", "五股區": "新北西區", "泰山區": "新北西區",
 }
 DISTRICT_CENTERS = {
     "北投區": (25.1324, 121.5025), "士林區": (25.0950, 121.5246), "大同區": (25.0634, 121.5130), "中正區": (25.0324, 121.5196), "萬華區": (25.0337, 121.4977),
     "大安區": (25.0268, 121.5430), "中山區": (25.0643, 121.5335), "松山區": (25.0497, 121.5770), "信義區": (25.0330, 121.5666), "內湖區": (25.0695, 121.5898),
     "南港區": (25.0554, 121.6070), "文山區": (24.9898, 121.5705), "新店區": (24.9676, 121.5415), "土城區": (24.9722, 121.4437), "永和區": (25.0098, 121.5137),
     "中和區": (24.9993, 121.4980), "板橋區": (25.0114, 121.4638), "樹林區": (24.9907, 121.4206), "三峽區": (24.9343, 121.3693), "蘆洲區": (25.0849, 121.4706),
-    "三重區": (25.0628, 121.4885), "新莊區": (25.0360, 121.4500), "五股區": (25.0840, 121.4380), "泰山區": (25.0587, 121.4329),
+    "三重區": (25.0628, 121.4885), "新莊區": (25.0360, 121.4500), "汐止區": (25.0709795, 121.6312968), "五股區": (25.0840, 121.4380), "泰山區": (25.0587, 121.4329),
 }
 
 
@@ -133,9 +140,9 @@ def build_stores() -> pd.DataFrame:
     rows = []
     for name, address in RAW_STORES:
         district = district_from_address(address)
-        if any(ex in address for ex in EXCLUDED_DISTRICTS) or district in EXCLUDED_DISTRICTS:
+        if name not in INCLUDED_STORE_NAMES and (any(ex in address for ex in EXCLUDED_DISTRICTS) or district in EXCLUDED_DISTRICTS):
             continue
-        lat, lon = DISTRICT_CENTERS.get(district, (25.03, 121.52))
+        lat, lon = STORE_COORDS.get(name, DISTRICT_CENTERS.get(district, (25.03, 121.52)))
         rows.append({"name": name, "brand": "家樂福超市", "address": address, "lat": lat, "lon": lon, "region": REGION_BY_DISTRICT.get(district, "其他區"), "normalized_name": normalize_name(name)})
     return pd.DataFrame(rows)
 
@@ -368,7 +375,7 @@ def complete_and_save(
     save_pending(remaining)
     updated_text = "\n".join(remaining)
     sync_today_text(updated_text)
-    st.session_state["done_flash"] = f"已自動保存剩餘 {len(remaining)} 筆。"
+    st.session_state["done_flash"] = f"已保存剩餘 {len(remaining)} 筆。"
     st.rerun()
 
 
@@ -612,13 +619,22 @@ def main() -> None:
     completed_ids = set(st.session_state.get("completed_item_ids", []))
     filtered_raw = filter_completed_from_today_text(raw, stores, completed_ids)
     if filtered_raw != raw:
-        sync_today_text(filtered_raw, save=True)
+        sync_today_text(filtered_raw)
         st.rerun()
-    col_a, col_b = st.columns(2)
+    col_a, col_save, col_b = st.columns(3)
     with col_a:
         start_plan = st.button("開始規劃今日路線", type="primary", width="stretch")
         if start_plan:
             st.session_state["planning_active"] = True
+    with col_save:
+        if st.button("儲存清單", width="stretch"):
+            save_text = current_today_text(raw)
+            save_text = filter_completed_from_today_text(save_text, stores, completed_ids)
+            save_lines = [line.strip() for line in save_text.splitlines() if line.strip()]
+            save_pending(save_lines)
+            sync_today_text("\n".join(save_lines))
+            st.session_state["done_flash"] = f"已儲存今日清單 {len(save_lines)} 家。"
+            st.rerun()
     with col_b:
         if st.button("清空清單", width="stretch"):
             st.session_state["completed_item_ids"] = []
