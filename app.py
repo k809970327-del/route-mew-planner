@@ -5,7 +5,6 @@ import hashlib
 import json
 import math
 import re
-import traceback
 import urllib.parse
 from datetime import datetime, time, timedelta
 from difflib import SequenceMatcher
@@ -734,17 +733,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as exc:
-        # Temporary cloud diagnostic: only the existing app PIN can reveal details.
-        try:
-            diagnostic_pin = str(st.secrets.get("APP_PIN", "")).strip()
-        except Exception:
-            diagnostic_pin = ""
-        st.error("雲端啟動時發生錯誤，正在檢查原因。")
-        if diagnostic_pin:
-            diagnostic_value = st.text_input("輸入登入密碼以查看診斷", type="password", key="cloud_diagnostic_pin")
-            if diagnostic_value == diagnostic_pin:
-                st.code(f"{type(exc).__name__}: {exc}")
-                st.code(traceback.format_exc())
+    main()
