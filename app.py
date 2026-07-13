@@ -21,10 +21,12 @@ ROAD_FACTOR = 1.4
 DEFAULT_SPEED_KMH = 35
 DEFAULT_STOP_MINUTES = 25
 PENDING_FILE = Path(__file__).with_name("pending_store_list.json")
+STORE_BRAND = "樂家康超市"
 EXCLUDED_DISTRICTS = {"基隆市", "汐止區", "淡水區", "林口區", "深坑區"}
 INCLUDED_STORE_NAMES = {"汐止明峰店"}
 STORE_ALIASES = {"台北西藏店": "萬華西藏店", "西藏店": "萬華西藏店"}
 STORE_COORDS = {
+    "土城廣明店": (24.9933818, 121.4542998),
     "汐止明峰店": (25.0709795, 121.6312968),
 }
 
@@ -63,6 +65,7 @@ RAW_STORES = [
     ("新店如意店", "新北市新店區如意街95、97號"), ("新店安康二店", "新北市新店區安康路二段136巷59號"),
     ("新店安康店", "新北市新店區安康路2段196號B1"), ("新店安祥店", "新北市新店區安祥路85-89號"),
     ("新店新坡一店", "新北市新店區新坡一街75號B1"), ("新店溪園店", "新北市新店區溪園路399號"),
+    ("土城廣明店", "新北市土城區廣明街63巷31號1樓"),
     ("土城立德店", "新北市土城區立德路105號"), ("土城金城店", "新北市土城區金城路三段202-6號"),
     ("土城學府店", "新北市土城區學府路1段157, 161號"), ("永和仁愛店", "新北市永和區仁愛路152號B1"),
     ("永和竹林店", "新北市永和區竹林路60號"), ("中和中山店", "新北市中和區員山路489~497號1樓"),
@@ -131,7 +134,7 @@ def district_from_address(address: str) -> str:
 
 def normalize_name(text: str) -> str:
     text = re.sub(r"[\s　:：｜|,，。．.\-_/()（）\[\]【】]+", "", str(text))
-    for token in ["家樂福超市", "家樂福", "超市", "店"]:
+    for token in ["樂家康超市", "樂家康", "家樂福超市", "家樂福", "超市", "店"]:
         text = text.replace(token, "")
     return text
 
@@ -143,7 +146,7 @@ def build_stores() -> pd.DataFrame:
         if name not in INCLUDED_STORE_NAMES and (any(ex in address for ex in EXCLUDED_DISTRICTS) or district in EXCLUDED_DISTRICTS):
             continue
         lat, lon = STORE_COORDS.get(name, DISTRICT_CENTERS.get(district, (25.03, 121.52)))
-        rows.append({"name": name, "brand": "家樂福超市", "address": address, "lat": lat, "lon": lon, "region": REGION_BY_DISTRICT.get(district, "其他區"), "normalized_name": normalize_name(name)})
+        rows.append({"name": name, "brand": STORE_BRAND, "address": address, "lat": lat, "lon": lon, "region": REGION_BY_DISTRICT.get(district, "其他區"), "normalized_name": normalize_name(name)})
     return pd.DataFrame(rows)
 
 
@@ -253,7 +256,7 @@ def match_inputs(text: str, stores: pd.DataFrame) -> tuple[pd.DataFrame, list[st
             _, task = parse_line(line)
             result[last_idx]["任務"] = merge_task(result[last_idx].get("任務", ""), task or "臨時事件")
             continue
-        if last_idx is not None and not any(word in line for word in ["店", "家樂福", "收退貨", "退貨"]) and len(line) <= 24:
+        if last_idx is not None and not any(word in line for word in ["店", "樂家康", "家樂福", "收退貨", "退貨"]) and len(line) <= 24:
             old = result[last_idx].get("任務", "")
             result[last_idx]["任務"] = merge_task(old, f"收退貨：{line}")
             continue
@@ -288,7 +291,7 @@ def input_entries(text: str, stores: pd.DataFrame) -> list[dict]:
             current["task"] = merge_task(current.get("task", ""), task or "臨時事件")
             current["lines"].append(line)
             continue
-        if current and current.get("row") is not None and not any(word in line for word in ["店", "家樂福", "收退貨", "退貨"]) and len(line) <= 24:
+        if current and current.get("row") is not None and not any(word in line for word in ["店", "樂家康", "家樂福", "收退貨", "退貨"]) and len(line) <= 24:
             current["task"] = merge_task(current.get("task", ""), f"收退貨：{line}")
             current["lines"].append(line)
             continue
@@ -416,7 +419,7 @@ def maps_url(route: pd.DataFrame, current_location: bool = False) -> str:
 
 
 def single_maps_url(row: pd.Series, current_location: bool = True) -> str:
-    destination = f'{row.get("brand", "家樂福超市")} {row.get("name", row.get("門市", ""))} {row.get("address", row.get("地址", ""))}'
+    destination = f'{row.get("brand", STORE_BRAND)} {row.get("name", row.get("門市", ""))} {row.get("address", row.get("地址", ""))}'
     params = {"api": "1", "travelmode": "driving", "destination": destination}
     if not current_location:
         params["origin"] = HOME_ADDRESS
